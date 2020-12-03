@@ -26,6 +26,8 @@
 
 // #define DEBUG_LOG
 // #define USE_C_IO_URING
+// #define USE_SEND_SYSCALL
+// #define USE_RECV_SYSCALL
 
 #define THROW_ERROR(fmt, ...)   do { \
     printf("\t\tERROR:" fmt " in func %s at line %d of file %s\n", \
@@ -175,7 +177,8 @@ extern int32_t io_uring_do_sendmsg(int fd,
     size_t msg_iovlen,
     const void* msg_control,
     size_t msg_controllen,
-    int flags);
+    int flags,
+    struct msghdr* msg_ptr);
 
 extern int32_t io_uring_do_recvmsg(int fd,
     void* msg_name,
@@ -187,9 +190,16 @@ extern int32_t io_uring_do_recvmsg(int fd,
     size_t msg_controllen,
     size_t* msg_controllen_recv,
     int* msg_flags_recv,
-    int flags);
+    int flags,
+    struct msghdr* msg_ptr);
+
+extern void clear_register_files();
 
 int do_read(int fd, const void* buf, size_t n) {
+    #ifdef USE_RECV_SYSCALL
+    return read(fd, buf, n);
+    #endif
+
     struct iovec iov[1];
     iov[0].iov_base = buf;
     iov[0].iov_len = n;
@@ -207,7 +217,8 @@ int do_read(int fd, const void* buf, size_t n) {
         msg.msg_name, msg.msg_namelen, &msg_namelen_recv,
         msg.msg_iov, msg.msg_iovlen, 
         msg.msg_control, msg.msg_controllen, &msg_controllen_recv,
-        &msg_flags_recv, 0);
+        &msg_flags_recv, 0,
+        &msg);
     #endif
    
     #ifdef DEBUG_LOG
@@ -217,6 +228,10 @@ int do_read(int fd, const void* buf, size_t n) {
 }
 
 int do_write(int fd, const void* buf, size_t n) {
+    #ifdef USE_SEND_SYSCALL
+    return write(fd, buf, n);
+    #endif
+
     struct iovec iov[1];
     iov[0].iov_base = buf;
     iov[0].iov_len = n;
@@ -231,7 +246,8 @@ int do_write(int fd, const void* buf, size_t n) {
         msg.msg_name, msg.msg_namelen,
         msg.msg_iov, msg.msg_iovlen, 
         msg.msg_control, msg.msg_controllen,
-        0);
+        0,
+        &msg);
     #endif
     
     #ifdef DEBUG_LOG
@@ -241,6 +257,10 @@ int do_write(int fd, const void* buf, size_t n) {
 }
 
 int do_recv(int fd, const void* buf, size_t n, int flags) {
+    #ifdef USE_RECV_SYSCALL
+    return recv(fd, buf, n, flags);
+    #endif
+
     struct iovec iov[1];
     iov[0].iov_base = buf;
     iov[0].iov_len = n;
@@ -259,7 +279,8 @@ int do_recv(int fd, const void* buf, size_t n, int flags) {
         msg.msg_name, msg.msg_namelen, &msg_namelen_recv,
         msg.msg_iov, msg.msg_iovlen, 
         msg.msg_control, msg.msg_controllen, &msg_controllen_recv,
-        &msg_flags_recv, 0);
+        &msg_flags_recv, flags,
+        &msg);
     #endif
    
     #ifdef DEBUG_LOG
@@ -269,6 +290,10 @@ int do_recv(int fd, const void* buf, size_t n, int flags) {
 }
 
 int do_send(int fd, const void* buf, size_t n, int flags) {
+    #ifdef USE_SEND_SYSCALL
+    return send(fd, buf, n, flags);
+    #endif
+
     struct iovec iov[1];
     iov[0].iov_base = buf;
     iov[0].iov_len = n;
@@ -283,7 +308,8 @@ int do_send(int fd, const void* buf, size_t n, int flags) {
         msg.msg_name, msg.msg_namelen,
         msg.msg_iov, msg.msg_iovlen, 
         msg.msg_control, msg.msg_controllen,
-        0);
+        flags,
+        &msg);
     #endif
     
     #ifdef DEBUG_LOG
@@ -293,6 +319,10 @@ int do_send(int fd, const void* buf, size_t n, int flags) {
 }
 
 int do_recvmsg(int fd, struct msghdr * msg, int flags) {
+    #ifdef USE_RECV_SYSCALL
+    return recvmsg(fd, msg, flags);
+    #endif
+
     if (msg->msg_iovlen == 0) {
         #ifdef DEBUG_LOG
         printf("%s res %d\n", __func__, 0);
@@ -312,7 +342,8 @@ int do_recvmsg(int fd, struct msghdr * msg, int flags) {
         msg->msg_name, msg->msg_namelen, &msg_namelen_recv,
         msg->msg_iov, msg->msg_iovlen, 
         msg->msg_control, msg->msg_controllen, &msg_controllen_recv,
-        &msg_flags_recv, 0);
+        &msg_flags_recv, flags,
+        msg);
     #endif
    
     #ifdef DEBUG_LOG
@@ -322,6 +353,10 @@ int do_recvmsg(int fd, struct msghdr * msg, int flags) {
 }
 
 int do_sendmsg(int fd, struct msghdr * msg, int flags) {
+    #ifdef USE_SEND_SYSCALL
+    return sendmsg(fd, msg, flags);
+    #endif
+
     if (msg->msg_iovlen == 0) {
         #ifdef DEBUG_LOG
         printf("%s res %d\n", __func__, 0);
@@ -338,7 +373,8 @@ int do_sendmsg(int fd, struct msghdr * msg, int flags) {
         msg->msg_name, msg->msg_namelen,
         msg->msg_iov, msg->msg_iovlen, 
         msg->msg_control, msg->msg_controllen,
-        0);
+        flags,
+        msg);
     #endif
     
     #ifdef DEBUG_LOG
@@ -858,6 +894,7 @@ int test_poll() {
 
 
 int main(int argc, const char *argv[]) {
+    clear_register_files();
     #ifdef USE_C_IO_URING
     init_io_uring();
     #endif
@@ -866,6 +903,7 @@ int main(int argc, const char *argv[]) {
     destroy_io_uring();
     #endif
 
+    clear_register_files();
     #ifdef USE_C_IO_URING
     init_io_uring();
     #endif
@@ -874,6 +912,7 @@ int main(int argc, const char *argv[]) {
     destroy_io_uring();
     #endif
 
+    clear_register_files();
     #ifdef USE_C_IO_URING
     init_io_uring();
     #endif
@@ -882,6 +921,7 @@ int main(int argc, const char *argv[]) {
     destroy_io_uring();
     #endif
 
+    clear_register_files();
     #ifdef USE_C_IO_URING
     init_io_uring();
     #endif

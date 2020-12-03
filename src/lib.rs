@@ -24,7 +24,7 @@ use io_uring_allocator::*;
 
 const IO_URING_SIZE: usize = 1024;
 const IO_URING_FILE_SET_SIZE: usize = 16;
-const IO_URING_BUFFER_SIZE: usize = 1024 * 1024 * 256;
+const IO_URING_BUFFER_SIZE: usize = 1024 * 1024 * 64;
 
 #[no_mangle]
 pub extern fn io_uring_do_sendmsg(
@@ -35,7 +35,8 @@ pub extern fn io_uring_do_sendmsg(
     msg_iovlen: size_t,
     msg_control: *const c_void,
     msg_controllen: size_t,
-    flags: c_int) -> i32 {
+    flags: c_int,
+    msg_ptr_test: *mut msghdr) -> i32 {
 
     if let Ok(retval) = IO_AGENT.io_uring_sendmsg(
         fd,
@@ -46,6 +47,7 @@ pub extern fn io_uring_do_sendmsg(
         msg_control,
         msg_controllen,
         flags,
+        msg_ptr_test,
     ) {
         retval as i32
     } else {
@@ -64,7 +66,8 @@ pub extern fn io_uring_do_recvmsg(fd: c_int,
         msg_controllen: size_t,
         msg_controllen_recv: *mut size_t,
         msg_flags_recv: *mut c_int,
-        flags: c_int) -> i32 {
+        flags: c_int,
+        msg_ptr_test: *mut msghdr) -> i32 {
     
             if let Ok(retval) = IO_AGENT.io_uring_recvmsg(
                 fd,
@@ -78,11 +81,17 @@ pub extern fn io_uring_do_recvmsg(fd: c_int,
                 msg_controllen_recv,
                 msg_flags_recv,
                 flags,
+                msg_ptr_test,
             ) {
                 retval as i32
             } else {
                 -1
             }
+}
+
+#[no_mangle]
+pub extern fn clear_register_files() {
+    IO_AGENT.io_uring_unregister_all_files();
 }
 
 pub struct IoAgent {
@@ -194,6 +203,28 @@ impl IoAgent {
         }
     }
 
+    pub fn io_uring_unregister_all_files(&self) {
+        let mut fds_guard = self.fds.lock().unwrap();
+        fds_guard.iter().enumerate().filter(|&(i, x)| *x != -1).for_each(|(i, x)| {
+            let empty_fd = -1;
+            let mut ret = 
+            unsafe {
+                occlum_ocall_io_uring_update_file(
+                    self.io_uring_addr,
+                    empty_fd,
+                    i as u32,
+                )
+            };
+            if ret != 1 {
+                println!("io_uring_unregister_all_files error! fd: {}, index: {}, ret: {}", i, x, ret);
+            }
+        });
+        for elem in fds_guard.iter_mut() {
+            *elem = -1;
+        }
+        println!("io_uring_unregister_all_files fds: {:?}", fds_guard);
+    }
+
     pub fn io_uring_sendmsg(
         &self,
         fd: c_int,
@@ -204,6 +235,7 @@ impl IoAgent {
         msg_control: *const c_void,
         msg_controllen: size_t,
         flags: c_int,
+        msg_ptr_test: *mut msghdr
     ) -> Result<isize, ()> {
         println!("io_uring_sendmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
@@ -287,6 +319,7 @@ impl IoAgent {
             sqe,
             fixed_fd as i32,
             msghdr_ptr,
+            // msg_ptr_test,
             flags as u32,
             req_id,
             IOSQE_FIXED_FILE,
@@ -314,6 +347,7 @@ impl IoAgent {
         msg_controllen_recv: *mut size_t,
         msg_flags: *mut c_int,
         flags: c_int,
+        msg_ptr_test: *mut msghdr
     ) -> Result<isize, ()> {
         println!("io_uring_recvmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
@@ -399,6 +433,7 @@ impl IoAgent {
             sqe,
             fixed_fd as i32,
             msghdr_ptr,
+            // msg_ptr_test,
             flags as u32,
             req_id,
             IOSQE_FIXED_FILE,
