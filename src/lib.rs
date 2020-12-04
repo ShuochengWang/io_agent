@@ -107,14 +107,17 @@ impl IoAgent {
     pub fn new(ring_size: usize) -> Self {
         println!("init IoAgent");
 
-        // unsafe{ init_io_uring2();}
-        // return Self {
-        //     io_uring_addr: 0,
-        //     io_uring: ptr::null::<IoUring>() as *mut IoUring,
-        //     inc_id: atomic::AtomicU64::new(0),
-        //     fds: Mutex::new(Vec::new()),
-        //     allocator: IoUringAllocator::empty_alloc(),
-        // };
+        // use wrapper C directly
+        unsafe {
+            init_io_uring2();
+        }
+        return Self {
+            io_uring_addr: 0,
+            io_uring: ptr::null::<IoUring>() as *mut IoUring,
+            inc_id: atomic::AtomicU64::new(0),
+            fds: Mutex::new(Vec::new()),
+            allocator: IoUringAllocator::empty_alloc(),
+        };
 
         let mut io_uring_addr: u64 = unsafe { occlum_ocall_io_uring_init(ring_size as u32) };
 
@@ -207,8 +210,11 @@ impl IoAgent {
     }
 
     pub fn io_uring_unregister_all_files(&self) {
-        // unsafe { c_clear_register_files2();}
-        // return;
+        // use wrapper C directly
+        unsafe {
+            c_clear_register_files2();
+        }
+        return;
 
         let mut fds_guard = self.fds.lock().unwrap();
         fds_guard
@@ -248,9 +254,10 @@ impl IoAgent {
         println!("io_uring_sendmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
 
-        // let bytes_sent = unsafe { do_sendmsg2(fd, msg_ptr_test, flags) };
-        // println!("sendmsg cqe res {}, fd: {}", bytes_sent, fd);
-        // return Ok(bytes_sent as isize);
+        // use wrapper C directly
+        let bytes_sent = unsafe { do_sendmsg2(fd, msg_ptr_test, flags) };
+        println!("sendmsg cqe res {}, fd: {}", bytes_sent, fd);
+        return Ok(bytes_sent as isize);
 
         let u_msghdr = self
             .allocator
@@ -377,9 +384,10 @@ impl IoAgent {
         println!("io_uring_recvmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
 
-        // let bytes_recv = unsafe { do_recvmsg2(fd, msg_ptr_test, flags) };
-        // println!("recvmsg cqe res {}, fd: {}", bytes_recv, fd);
-        // return Ok(bytes_recv as isize);
+        // use wrapper C directly
+        let bytes_recv = unsafe { do_recvmsg2(fd, msg_ptr_test, flags) };
+        println!("recvmsg cqe res {}, fd: {}", bytes_recv, fd);
+        return Ok(bytes_recv as isize);
 
         let u_msghdr = self
             .allocator
