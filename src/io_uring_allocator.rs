@@ -17,12 +17,15 @@ impl IoUringAllocator {
             buf_pos: AtomicUsize::new(0),
         }
     }
-    
+
     pub fn new(buf_size: usize) -> Result<Self, ()> {
         let layout = unsafe { Layout::from_size_align_unchecked(buf_size, 1) };
         let buf_ptr = unsafe { alloc(layout) };
         let buf_pos = AtomicUsize::new(0);
-        println!("IoUringAllocator init. buf_ptr: {:?}, buf_size: {}", buf_ptr, buf_size);
+        println!(
+            "IoUringAllocator init. buf_ptr: {:?}, buf_size: {}",
+            buf_ptr, buf_size
+        );
         Ok(Self {
             buf_ptr,
             buf_size,
@@ -35,21 +38,21 @@ impl IoUringAllocator {
         assert!((align != 0) && (align & (align - 1)) == 0);
 
         let new_slice_ptr = {
-            let mut pos = self
-                .buf_pos
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old_pos| {
-                    let mut new_pos = old_pos + new_slice_len;
+            let mut pos =
+                self.buf_pos
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old_pos| {
+                        let mut new_pos = old_pos + new_slice_len;
 
-                    if old_pos % align != 0 {
-                        new_pos += align - old_pos % align;
-                    }
+                        if old_pos % align != 0 {
+                            new_pos += align - old_pos % align;
+                        }
 
-                    if new_pos <= self.buf_size {
-                        Some(new_pos)
-                    } else {
-                        None
-                    }
-                });
+                        if new_pos <= self.buf_size {
+                            Some(new_pos)
+                        } else {
+                            None
+                        }
+                    });
 
             if let Ok(p) = pos {
                 let mut mp = p;

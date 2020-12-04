@@ -157,12 +157,7 @@ impl IoUring {
 
         if self.sq_ring_needs_enter(&mut flags) {
             unsafe {
-                occlum_ocall_io_uring_enter(
-                    self.ring_fd,
-                    submitted,
-                    0,
-                    flags,
-                );
+                occlum_ocall_io_uring_enter(self.ring_fd, submitted, 0, flags);
             }
         } else {
             ret = submitted as i32;
@@ -313,10 +308,5 @@ pub fn io_uring_prep_sendmsg(
 }
 
 extern "C" {
-    fn occlum_ocall_io_uring_enter(
-        fd: i32,
-        to_submit: u32,
-        min_complete: u32,
-        flags: u32,
-    ) -> i32;
+    fn occlum_ocall_io_uring_enter(fd: i32, to_submit: u32, min_complete: u32, flags: u32) -> i32;
 }

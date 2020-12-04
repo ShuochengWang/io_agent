@@ -1,7 +1,7 @@
 /* source file: https://github.com/axboe/liburing/blob/master/src/include/liburing/io_uring.h
    liburing version: commit 36026fcb261a718f81858d6dc760a8bf50d594b8
-   
-   Convert io_uring.h to io_uring.rs by rust-bindgen and then refactor code. 
+
+   Convert io_uring.h to io_uring.rs by rust-bindgen and then refactor code.
 */
 
 #[repr(C)]
@@ -142,7 +142,6 @@ pub union io_uring_sqe__bindgen_ty_4__bindgen_ty_1__bindgen_ty_1 {
     pub buf_group: u16,
     _bindgen_union_align: [u8; 2usize],
 }
-
 
 pub const IOSQE_FIXED_FILE_BIT: u32 = 0;
 pub const IOSQE_IO_DRAIN_BIT: u32 = 1;

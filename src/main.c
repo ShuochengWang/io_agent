@@ -21,10 +21,10 @@
 #define RESPONSE "ACK"
 #define DEFAULT_MSG "Hello World!\n"
 
-#define FD_NUM 128
+#define FD_NUM 16
 #define RES_SIZE 10240
 
-// #define DEBUG_LOG
+#define DEBUG_LOG
 // #define USE_C_IO_URING
 // #define USE_SEND_SYSCALL
 // #define USE_RECV_SYSCALL
@@ -43,9 +43,6 @@ pthread_t thread_id;
 int req_id;
 int has_results[RES_SIZE];
 int results[RES_SIZE];
-
-int test_fd_server;
-int test_fd_client;
 
 void init_io_uring() {
     int ring_flags = 0;
@@ -76,14 +73,37 @@ void destroy_io_uring() {
 
 int get_fixed_fd(int fd) {
     for (int i = 0; i < FD_NUM; ++i) {
-        if (fds[i] == fd) return i;
+        if (fds[i] == fd) {
+
+            printf("fds: [");
+            for (int i = 0; i < FD_NUM; ++i) printf("%d, ", fds[i]);
+            printf("]\n");
+            
+            return i;
+        }
     }
     for (int i = 0; i < FD_NUM; ++i) {
         if (fds[i] == -1) {
             int ret = io_uring_register_files_update(&ring, i, &fd, 1);
             assert(ret == 1);
             fds[i] = fd;
+
+            printf("fds: [");
+            for (int i = 0; i < FD_NUM; ++i) printf("%d, ", fds[i]);
+            printf("]\n");
+
             return i;
+        }
+    }
+}
+
+void c_clear_register_files() {
+    for (int i = 0; i < FD_NUM; ++i) {
+        if (fds[i] != -1) {
+            int empty_fd = -1;
+            int ret = io_uring_register_files_update(&ring, i, &empty_fd, 1);
+            assert(ret == 1);
+            fds[i] = empty_fd;
         }
     }
 }
@@ -193,7 +213,7 @@ extern int32_t io_uring_do_recvmsg(int fd,
     int flags,
     struct msghdr* msg_ptr);
 
-extern void clear_register_files();
+extern void rust_clear_register_files();
 
 int do_read(int fd, const void* buf, size_t n) {
     #ifdef USE_RECV_SYSCALL
@@ -508,7 +528,6 @@ int client(void* arg) {
     char buf[buf_size];
     int port = thread_arg->port;
     int server_fd = connect_with_server(thread_arg->addr_string, thread_arg->port_string);
-    test_fd_client = server_fd;
 
     switch (port) {
         case 8800:
@@ -894,38 +913,42 @@ int test_poll() {
 
 
 int main(int argc, const char *argv[]) {
-    clear_register_files();
     #ifdef USE_C_IO_URING
     init_io_uring();
     #endif
+
     test_read_write();
+
     #ifdef USE_C_IO_URING
-    destroy_io_uring();
+    c_clear_register_files();
+    #else
+    rust_clear_register_files();
     #endif
 
-    clear_register_files();
-    #ifdef USE_C_IO_URING
-    init_io_uring();
-    #endif
     test_send_recv();
+
     #ifdef USE_C_IO_URING
-    destroy_io_uring();
+    c_clear_register_files();
+    #else
+    rust_clear_register_files();
     #endif
 
-    clear_register_files();
-    #ifdef USE_C_IO_URING
-    init_io_uring();
-    #endif
     test_sendmsg_recvmsg();
+
     #ifdef USE_C_IO_URING
-    destroy_io_uring();
+    c_clear_register_files();
+    #else
+    rust_clear_register_files();
     #endif
 
-    clear_register_files();
-    #ifdef USE_C_IO_URING
-    init_io_uring();
-    #endif
     test_sendmsg_recvmsg_connectionless();
+    
+    #ifdef USE_C_IO_URING
+    c_clear_register_files();
+    #else
+    rust_clear_register_files();
+    #endif
+    
     #ifdef USE_C_IO_URING
     destroy_io_uring();
     #endif

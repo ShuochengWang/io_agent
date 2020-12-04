@@ -4,30 +4,30 @@ extern crate libc;
 #[macro_use]
 extern crate lazy_static;
 
-use libc::msghdr;
-use libc::c_void;
 use libc::c_int;
+use libc::c_void;
+use libc::msghdr;
 use libc::size_t;
-use std::collections::HashMap;
+use std::alloc::Layout;
 use std::assert;
+use std::collections::HashMap;
 use std::ptr;
 use std::sync::{atomic, Mutex};
-use std::alloc::{Layout};
 
 mod io_uring;
-mod liburing;
 mod io_uring_allocator;
+mod liburing;
 
 use io_uring::*;
-use liburing::*;
 use io_uring_allocator::*;
+use liburing::*;
 
 const IO_URING_SIZE: usize = 1024;
 const IO_URING_FILE_SET_SIZE: usize = 16;
 const IO_URING_BUFFER_SIZE: usize = 1024 * 1024 * 64;
 
 #[no_mangle]
-pub extern fn io_uring_do_sendmsg(
+pub extern "C" fn io_uring_do_sendmsg(
     fd: c_int,
     msg_name: *const c_void,
     msg_namelen: libc::socklen_t,
@@ -36,8 +36,8 @@ pub extern fn io_uring_do_sendmsg(
     msg_control: *const c_void,
     msg_controllen: size_t,
     flags: c_int,
-    msg_ptr_test: *mut msghdr) -> i32 {
-
+    msg_ptr_test: *mut msghdr,
+) -> i32 {
     if let Ok(retval) = IO_AGENT.io_uring_sendmsg(
         fd,
         msg_name,
@@ -56,41 +56,42 @@ pub extern fn io_uring_do_sendmsg(
 }
 
 #[no_mangle]
-pub extern fn io_uring_do_recvmsg(fd: c_int,
-        msg_name: *mut c_void,
-        msg_namelen: libc::socklen_t,
-        msg_namelen_recv: *mut libc::socklen_t,
-        msg_iov: *mut libc::iovec,
-        msg_iovlen: size_t,
-        msg_control: *mut c_void,
-        msg_controllen: size_t,
-        msg_controllen_recv: *mut size_t,
-        msg_flags_recv: *mut c_int,
-        flags: c_int,
-        msg_ptr_test: *mut msghdr) -> i32 {
-    
-            if let Ok(retval) = IO_AGENT.io_uring_recvmsg(
-                fd,
-                msg_name,
-                msg_namelen,
-                msg_namelen_recv,
-                msg_iov,
-                msg_iovlen,
-                msg_control,
-                msg_controllen,
-                msg_controllen_recv,
-                msg_flags_recv,
-                flags,
-                msg_ptr_test,
-            ) {
-                retval as i32
-            } else {
-                -1
-            }
+pub extern "C" fn io_uring_do_recvmsg(
+    fd: c_int,
+    msg_name: *mut c_void,
+    msg_namelen: libc::socklen_t,
+    msg_namelen_recv: *mut libc::socklen_t,
+    msg_iov: *mut libc::iovec,
+    msg_iovlen: size_t,
+    msg_control: *mut c_void,
+    msg_controllen: size_t,
+    msg_controllen_recv: *mut size_t,
+    msg_flags_recv: *mut c_int,
+    flags: c_int,
+    msg_ptr_test: *mut msghdr,
+) -> i32 {
+    if let Ok(retval) = IO_AGENT.io_uring_recvmsg(
+        fd,
+        msg_name,
+        msg_namelen,
+        msg_namelen_recv,
+        msg_iov,
+        msg_iovlen,
+        msg_control,
+        msg_controllen,
+        msg_controllen_recv,
+        msg_flags_recv,
+        flags,
+        msg_ptr_test,
+    ) {
+        retval as i32
+    } else {
+        -1
+    }
 }
 
 #[no_mangle]
-pub extern fn clear_register_files() {
+pub extern "C" fn rust_clear_register_files() {
     IO_AGENT.io_uring_unregister_all_files();
 }
 
@@ -106,10 +107,16 @@ impl IoAgent {
     pub fn new(ring_size: usize) -> Self {
         println!("init IoAgent");
 
-        let mut io_uring_addr: u64 = 
-        unsafe {
-            occlum_ocall_io_uring_init(ring_size as u32)
-        };
+        // unsafe{ init_io_uring2();}
+        // return Self {
+        //     io_uring_addr: 0,
+        //     io_uring: ptr::null::<IoUring>() as *mut IoUring,
+        //     inc_id: atomic::AtomicU64::new(0),
+        //     fds: Mutex::new(Vec::new()),
+        //     allocator: IoUringAllocator::empty_alloc(),
+        // };
+
+        let mut io_uring_addr: u64 = unsafe { occlum_ocall_io_uring_init(ring_size as u32) };
 
         if let Ok(alloc) = IoUringAllocator::new(IO_URING_BUFFER_SIZE) {
             Self {
@@ -139,8 +146,7 @@ impl IoAgent {
             let fds_ptr = fds_guard.as_slice().as_ptr();
             let fds_len = fds_guard.as_slice().len();
 
-            let mut ret = 
-            unsafe {
+            let mut ret = unsafe {
                 occlum_ocall_io_uring_register_files(
                     self.io_uring_addr,
                     fds_ptr as *const i32,
@@ -160,15 +166,12 @@ impl IoAgent {
         } else if let Some(fd_idx) = fds_guard.iter().position(|&x| x == -1) {
             fds_guard[fd_idx] = fd;
 
-            let mut ret = 
-            unsafe {
-                occlum_ocall_io_uring_update_file(
-                    self.io_uring_addr,
-                    fd,
-                    fd_idx as u32,
-                )
-            };
-            println!("fd: {}, index: {}, fds: {:?}, ret: {}", fd, fd_idx, fds_guard, ret);
+            let mut ret =
+                unsafe { occlum_ocall_io_uring_update_file(self.io_uring_addr, fd, fd_idx as u32) };
+            println!(
+                "fd: {}, index: {}, fds: {:?}, ret: {}",
+                fd, fd_idx, fds_guard, ret
+            );
 
             if ret != 1 {
                 println!("occlum_ocall_io_uring_register_files update file failed");
@@ -186,39 +189,44 @@ impl IoAgent {
         if let Some(fd_idx) = fds_guard.iter().position(|&x| x == fd) {
             let empty_fd = -1;
             fds_guard[fd_idx] = empty_fd;
-            let mut ret = 
-            unsafe {
-                occlum_ocall_io_uring_update_file(
-                    self.io_uring_addr,
-                    empty_fd,
-                    fd_idx as u32,
-                )
+            let mut ret = unsafe {
+                occlum_ocall_io_uring_update_file(self.io_uring_addr, empty_fd, fd_idx as u32)
             };
             if ret != 1 {
-                println!("occlum_ocall_io_uring_update_file error! fd: {}, index: {}, ret: {}", fd, fd_idx, ret);
-            }
-            else {
-                println!("io_uring_unregister_files_helper success, fd: {}, index: {}, fds: {:?}", fd, fd_idx, fds_guard);
+                println!(
+                    "occlum_ocall_io_uring_update_file error! fd: {}, index: {}, ret: {}",
+                    fd, fd_idx, ret
+                );
+            } else {
+                println!(
+                    "io_uring_unregister_files_helper success, fd: {}, index: {}, fds: {:?}",
+                    fd, fd_idx, fds_guard
+                );
             }
         }
     }
 
     pub fn io_uring_unregister_all_files(&self) {
+        // unsafe { c_clear_register_files2();}
+        // return;
+
         let mut fds_guard = self.fds.lock().unwrap();
-        fds_guard.iter().enumerate().filter(|&(i, x)| *x != -1).for_each(|(i, x)| {
-            let empty_fd = -1;
-            let mut ret = 
-            unsafe {
-                occlum_ocall_io_uring_update_file(
-                    self.io_uring_addr,
-                    empty_fd,
-                    i as u32,
-                )
-            };
-            if ret != 1 {
-                println!("io_uring_unregister_all_files error! fd: {}, index: {}, ret: {}", i, x, ret);
-            }
-        });
+        fds_guard
+            .iter()
+            .enumerate()
+            .filter(|&(i, x)| *x != -1)
+            .for_each(|(i, x)| {
+                let empty_fd = -1;
+                let mut ret = unsafe {
+                    occlum_ocall_io_uring_update_file(self.io_uring_addr, empty_fd, i as u32)
+                };
+                if ret != 1 {
+                    println!(
+                        "io_uring_unregister_all_files error! fd: {}, index: {}, ret: {}",
+                        i, x, ret
+                    );
+                }
+            });
         for elem in fds_guard.iter_mut() {
             *elem = -1;
         }
@@ -235,14 +243,21 @@ impl IoAgent {
         msg_control: *const c_void,
         msg_controllen: size_t,
         flags: c_int,
-        msg_ptr_test: *mut msghdr
+        msg_ptr_test: *mut msghdr,
     ) -> Result<isize, ()> {
         println!("io_uring_sendmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
 
+        // let bytes_sent = unsafe { do_sendmsg2(fd, msg_ptr_test, flags) };
+        // println!("sendmsg cqe res {}, fd: {}", bytes_sent, fd);
+        // return Ok(bytes_sent as isize);
+
         let u_msghdr = self
             .allocator
-            .new_align_slice_mut(std::mem::size_of::<msghdr>(), Layout::new::<msghdr>().align())?
+            .new_align_slice_mut(
+                std::mem::size_of::<msghdr>(),
+                Layout::new::<msghdr>().align(),
+            )?
             .as_mut_ptr();
         let mut msghdr_ptr = u_msghdr as *mut msghdr;
 
@@ -254,7 +269,8 @@ impl IoAgent {
             let u_name_slice = self
                 .allocator
                 .new_align_slice_mut(msg_namelen as usize, 8)?;
-            let name_slice = unsafe { std::slice::from_raw_parts(msg_name as *const u8, msg_namelen as usize) };
+            let name_slice =
+                unsafe { std::slice::from_raw_parts(msg_name as *const u8, msg_namelen as usize) };
             u_name_slice.copy_from_slice(name_slice);
             unsafe { (*msghdr_ptr).msg_name = u_name_slice.as_mut_ptr() as *mut c_void }
         }
@@ -267,7 +283,8 @@ impl IoAgent {
             let u_control_slice = self
                 .allocator
                 .new_align_slice_mut(msg_controllen as usize, 8)?;
-            let control_slice = unsafe { std::slice::from_raw_parts(msg_control as *const u8, msg_controllen) };
+            let control_slice =
+                unsafe { std::slice::from_raw_parts(msg_control as *const u8, msg_controllen) };
             u_control_slice.copy_from_slice(control_slice);
             unsafe { (*msghdr_ptr).msg_control = u_control_slice.as_mut_ptr() as *mut c_void }
         }
@@ -277,12 +294,20 @@ impl IoAgent {
                 (*msghdr_ptr).msg_iov = ptr::null::<libc::iovec>() as *mut libc::iovec;
             }
         } else {
-            let u_iov_slice = self
-                .allocator
-                .new_align_slice_mut(msg_iovlen * std::mem::size_of::<libc::iovec>(), Layout::new::<libc::iovec>().align())?;
-            let iov_slice = unsafe { std::slice::from_raw_parts(msg_iov as *const u8, msg_iovlen * std::mem::size_of::<libc::iovec>()) };
+            let u_iov_slice = self.allocator.new_align_slice_mut(
+                msg_iovlen * std::mem::size_of::<libc::iovec>(),
+                Layout::new::<libc::iovec>().align(),
+            )?;
+            let iov_slice = unsafe {
+                std::slice::from_raw_parts(
+                    msg_iov as *const u8,
+                    msg_iovlen * std::mem::size_of::<libc::iovec>(),
+                )
+            };
             u_iov_slice.copy_from_slice(iov_slice);
-            unsafe { (*msghdr_ptr).msg_iov = u_iov_slice.as_ptr() as *mut libc::iovec; }
+            unsafe {
+                (*msghdr_ptr).msg_iov = u_iov_slice.as_ptr() as *mut libc::iovec;
+            }
         }
 
         unsafe {
@@ -310,10 +335,10 @@ impl IoAgent {
             }
         }
 
+        let guard = SQ_LOCK.lock().unwrap();
         let req_id = self.inc_id.fetch_add(1, atomic::Ordering::SeqCst);
         let fixed_fd = self.io_uring_register_files_helper(fd)?;
 
-        let guard = SQ_LOCK.lock().unwrap();
         let sqe = unsafe { (*self.io_uring).io_uring_get_sqe()? };
         io_uring_prep_sendmsg(
             sqe,
@@ -347,14 +372,21 @@ impl IoAgent {
         msg_controllen_recv: *mut size_t,
         msg_flags: *mut c_int,
         flags: c_int,
-        msg_ptr_test: *mut msghdr
+        msg_ptr_test: *mut msghdr,
     ) -> Result<isize, ()> {
         println!("io_uring_recvmsg, host_fd: {}, flags: {}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}", 
             fd, flags, msg_name, msg_namelen, msg_iov, msg_iovlen, msg_control, msg_controllen);
 
+        // let bytes_recv = unsafe { do_recvmsg2(fd, msg_ptr_test, flags) };
+        // println!("recvmsg cqe res {}, fd: {}", bytes_recv, fd);
+        // return Ok(bytes_recv as isize);
+
         let u_msghdr = self
             .allocator
-            .new_align_slice_mut(std::mem::size_of::<msghdr>(), Layout::new::<msghdr>().align())?
+            .new_align_slice_mut(
+                std::mem::size_of::<msghdr>(),
+                Layout::new::<msghdr>().align(),
+            )?
             .as_mut_ptr();
         let mut msghdr_ptr = u_msghdr as *mut msghdr;
 
@@ -368,7 +400,9 @@ impl IoAgent {
                 .new_align_slice_mut(msg_namelen as usize, 8)?;
             // let name_slice = unsafe { std::slice::from_raw_parts(msg_name as *const u8, msg_namelen as usize) };
             // u_name_slice.copy_from_slice(name_slice);
-            unsafe { (*msghdr_ptr).msg_name = u_name_slice.as_ptr() as *mut c_void; }
+            unsafe {
+                (*msghdr_ptr).msg_name = u_name_slice.as_ptr() as *mut c_void;
+            }
         }
 
         if msg_control as *const c_void == ptr::null() {
@@ -381,7 +415,9 @@ impl IoAgent {
                 .new_align_slice_mut(msg_controllen as usize, 8)?;
             // let control_slice = unsafe { std::slice::from_raw_parts(msg_control as *const u8, msg_controllen) };
             // u_control_slice.copy_from_slice(control_slice);
-            unsafe { (*msghdr_ptr).msg_control = u_control_slice.as_ptr() as *mut c_void; }
+            unsafe {
+                (*msghdr_ptr).msg_control = u_control_slice.as_ptr() as *mut c_void;
+            }
         }
 
         if msg_iov as *const libc::iovec == ptr::null() {
@@ -389,12 +425,20 @@ impl IoAgent {
                 (*msghdr_ptr).msg_iov = ptr::null::<libc::iovec>() as *mut libc::iovec;
             }
         } else {
-            let u_iov_slice = self
-                .allocator
-                .new_align_slice_mut(msg_iovlen * std::mem::size_of::<libc::iovec>(), Layout::new::<libc::iovec>().align())?;
-            let iov_slice = unsafe { std::slice::from_raw_parts(msg_iov as *const u8, msg_iovlen * std::mem::size_of::<libc::iovec>()) };
+            let u_iov_slice = self.allocator.new_align_slice_mut(
+                msg_iovlen * std::mem::size_of::<libc::iovec>(),
+                Layout::new::<libc::iovec>().align(),
+            )?;
+            let iov_slice = unsafe {
+                std::slice::from_raw_parts(
+                    msg_iov as *const u8,
+                    msg_iovlen * std::mem::size_of::<libc::iovec>(),
+                )
+            };
             u_iov_slice.copy_from_slice(iov_slice);
-            unsafe { (*msghdr_ptr).msg_iov = u_iov_slice.as_ptr() as *mut libc::iovec; }
+            unsafe {
+                (*msghdr_ptr).msg_iov = u_iov_slice.as_ptr() as *mut libc::iovec;
+            }
         }
 
         unsafe {
@@ -402,7 +446,7 @@ impl IoAgent {
             (*msghdr_ptr).msg_iovlen = msg_iovlen;
             (*msghdr_ptr).msg_controllen = msg_controllen;
             (*msghdr_ptr).msg_flags = 0;
-            
+
             println!(
                 "msghdr {:?}, name {:?}, len {}, iov {:?}, len {}, control {:?}, len {}, ",
                 msghdr_ptr,
@@ -424,10 +468,10 @@ impl IoAgent {
             }
         }
 
+        let guard = SQ_LOCK.lock().unwrap();
         let req_id = self.inc_id.fetch_add(1, atomic::Ordering::SeqCst);
         let fixed_fd = self.io_uring_register_files_helper(fd)?;
 
-        let guard = SQ_LOCK.lock().unwrap();
         let sqe = unsafe { (*self.io_uring).io_uring_get_sqe()? };
         io_uring_prep_recvmsg(
             sqe,
@@ -463,7 +507,7 @@ impl IoAgent {
                     msg_namelen as usize,
                 );
             }
-            
+
             if (*msghdr_ptr).msg_control as *const c_void != ptr::null() {
                 std::ptr::copy_nonoverlapping(
                     (*msghdr_ptr).msg_control as *const u8,
@@ -495,9 +539,7 @@ lazy_static! {
 }
 
 extern "C" {
-    fn occlum_ocall_io_uring_init(
-        ring_size: u32,
-    ) -> u64;
+    fn occlum_ocall_io_uring_init(ring_size: u32) -> u64;
 
     fn occlum_ocall_io_uring_exit(io_uring_addr: u64);
 
@@ -507,9 +549,11 @@ extern "C" {
         fds_len: u32,
     ) -> i32;
 
-    fn occlum_ocall_io_uring_update_file(
-        io_uring_addr: u64,
-        fd: i32,
-        offset: u32,
-    ) -> i32;
+    fn occlum_ocall_io_uring_update_file(io_uring_addr: u64, fd: i32, offset: u32) -> i32;
+
+    fn init_io_uring2();
+    fn c_clear_register_files2();
+    fn do_sendmsg2(fd: i32, msg_ptr: *mut msghdr, flags: i32) -> i32;
+    fn do_recvmsg2(fd: i32, msg_ptr: *mut msghdr, flags: i32) -> i32;
+
 }
